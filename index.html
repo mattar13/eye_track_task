@@ -8,6 +8,9 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1318; color: #e8edf5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 0.75rem; }
   #app { width: 100%; max-width: 1180px; }
+  body.playing { padding: 0.5rem; align-items: stretch; }
+  body.playing #app { max-width: none; min-height: calc(100vh - 1rem); display: flex; flex-direction: column; }
+  body.playing #game-screen { flex: 1; display: flex; flex-direction: column; }
 
   /* screens */
   #game-screen, #end-screen { display: none; }
@@ -45,6 +48,7 @@
     background: #090d17; border-radius: 12px; overflow: hidden; margin-bottom: 1rem;
     border: 0.5px solid #2a3349;
   }
+  body.playing #game-area { flex: 1; height: auto; min-height: 0; }
   #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
   #webcam-pip {
     position: absolute; bottom: 12px; right: 12px;
@@ -206,7 +210,11 @@ let canvas, ctx;
 
 function getCanvasSize(){
   const area=document.getElementById('game-area');
-  return {w:area.clientWidth, h:area.clientHeight};
+  const rect=area.getBoundingClientRect();
+  return {
+    w:Math.max(1, Math.round(rect.width || area.clientWidth || 1)),
+    h:Math.max(1, Math.round(rect.height || area.clientHeight || 1)),
+  };
 }
 
 function resizeCanvas(){
@@ -257,7 +265,7 @@ function applySelfieBoundary(r){
   }
 }
 
-async function startGame(){
+function startGame(){
   cfg={
     duration:  parseInt(document.getElementById('cfg-duration').value)  || 30,
     speed:     parseFloat(document.getElementById('cfg-speed').value),
@@ -270,8 +278,9 @@ async function startGame(){
 
   rows=[]; videoChunks=[]; videoBlob=null; csvData=null; currentPhaseIdx=0;
 
+  document.body.classList.add('playing');
   document.getElementById('start-screen').style.display='none';
-  document.getElementById('game-screen').style.display='block';
+  document.getElementById('game-screen').style.display='flex';
   document.getElementById('end-screen').style.display='none';
   document.getElementById('cam-error').style.display='none';
 
@@ -289,9 +298,20 @@ async function startGame(){
   document.getElementById('pip-off').style.display='none';
   stream=null; mediaRec=null;
 
+  startT=performance.now();
+  animId=requestAnimationFrame(loop);
+  startWebcam();
+}
+
+async function startWebcam(){
   if(cfg.webcam){
     try{
       stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+      if(!animId){
+        stream.getTracks().forEach(t=>t.stop());
+        stream=null;
+        return;
+      }
       const vid=document.getElementById('webcam-vid');
       vid.srcObject=stream;
       document.getElementById('webcam-pip').style.display=cfg.selfie?'block':'none';
@@ -311,9 +331,6 @@ async function startGame(){
   }else{
     document.getElementById('pip-off').style.display='none';
   }
-
-  startT=performance.now();
-  animId=requestAnimationFrame(loop);
 }
 
 function loop(now){
@@ -321,7 +338,8 @@ function loop(now){
   if(elapsed>=cfg.duration){ stopGame(); return; }
 
   const {w,h}=getCanvasSize();
-  if(canvas.width!==w||canvas.height!==h) resizeCanvas();
+  canvas.width=w;
+  canvas.height=h;
 
   const phaseIdx=Math.floor(elapsed/cfg.phaseDur)%PHASES.length;
   if(phaseIdx!==currentPhaseIdx){
@@ -394,6 +412,7 @@ function stopGame(){
   const lines=[cols.join(','), ...rows.map(r=>cols.map(c=>r[c]).join(','))];
   csvData=lines.join('\n');
 
+  document.body.classList.remove('playing');
   document.getElementById('game-screen').style.display='none';
   document.getElementById('end-screen').style.display='block';
 }
@@ -418,6 +437,7 @@ function triggerDownload(blob,filename){
 }
 
 function resetToStart(){
+  document.body.classList.remove('playing');
   document.getElementById('end-screen').style.display='none';
   document.getElementById('start-screen').style.display='block';
 }
