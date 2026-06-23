@@ -325,8 +325,9 @@ function startGame(){
 
   startT=performance.now();
   lastFrameT=startT;
+  drawFrame(0,w,h,cfg.size,PHASES[0]);
   animId=requestAnimationFrame(loop);
-  startWebcam();
+  setTimeout(startWebcam,500);
 }
 
 async function startWebcam(){
@@ -420,6 +421,12 @@ function loop(now){
     participant_id:cfg.pid,
   });
 
+  drawFrame(elapsed,w,h,r,phase,phaseIdx);
+
+  animId=requestAnimationFrame(loop);
+}
+
+function drawFrame(elapsed,w,h,r,phase,phaseIdx=0){
   ctx.fillStyle='#090d17';
   ctx.fillRect(0,0,w,h);
 
@@ -432,8 +439,6 @@ function loop(now){
   document.getElementById('progress-bar').style.width=prog.toFixed(1)+'%';
   document.getElementById('hud-time').textContent=elapsed.toFixed(1)+' s / '+cfg.duration+' s';
   document.getElementById('hud-phase').textContent='phase '+(phaseIdx+1)+' - '+phase.name;
-
-  animId=requestAnimationFrame(loop);
 }
 
 function stopGame(){
