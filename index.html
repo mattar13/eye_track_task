@@ -121,7 +121,7 @@
         </select>
       </div>
       <div class="row">
-        <label>Phase duration (s)</label>
+        <label>Avg phase duration (s)</label>
         <input type="number" id="cfg-phase-dur" value="4" min="1" max="30">
       </div>
     </div>
@@ -220,8 +220,11 @@ let startT=null;
 let lastFrameT=null;
 let rows=[];
 let ball={x:0,y:0,vx:0,vy:0};
-let currentPhaseIdx=0;
-let lastJumpPhaseIdx=-1;
+let currentPhase=null;
+let phaseCount=0;
+let phaseStart=0;
+let phaseEnd=0;
+let trackPath={mode:'line',angle:0,turnRate:0,wander:0};
 let stream=null;
 let mediaRec=null;
 let videoChunks=[];
@@ -247,9 +250,44 @@ function resizeCanvas(){
 
 function setTrackVelocity(w){
   const speedPx=(cfg.speed/100)*w;
-  const angle=Math.random()*Math.PI*2;
-  ball.vx=Math.cos(angle)*speedPx;
-  ball.vy=Math.sin(angle)*speedPx;
+  ball.vx=Math.cos(trackPath.angle)*speedPx;
+  ball.vy=Math.sin(trackPath.angle)*speedPx;
+}
+
+function randomBetween(min,max){
+  return min+Math.random()*(max-min);
+}
+
+function choosePhase(previousType){
+  const options=PHASES.filter(p=>p.type!==previousType);
+  return options[Math.floor(Math.random()*options.length)];
+}
+
+function randomPhaseDuration(){
+  const base=Math.max(1,cfg.phaseDur);
+  return randomBetween(base*0.6,base*1.6);
+}
+
+function startPhase(elapsed,w,h,r){
+  const previousType=currentPhase ? currentPhase.type : null;
+  currentPhase=choosePhase(previousType);
+  phaseCount+=1;
+  phaseStart=elapsed;
+  phaseEnd=elapsed+randomPhaseDuration();
+
+  if(currentPhase.type==='track'){
+    const modes=['line','curve','random path'];
+    trackPath.mode=modes[Math.floor(Math.random()*modes.length)];
+    trackPath.angle=Math.random()*Math.PI*2;
+    trackPath.turnRate=trackPath.mode==='curve' ? randomBetween(-1.2,1.2) : 0;
+    trackPath.wander=trackPath.mode==='random path' ? randomBetween(1.8,3.4) : 0;
+    setTrackVelocity(w);
+  }else if(currentPhase.type==='hold'){
+    ball.vx=0;
+    ball.vy=0;
+  }else if(currentPhase.type==='jump'){
+    jumpToRandomPosition(w,h,r);
+  }
 }
 
 function getSelfieBounds(){
@@ -334,7 +372,8 @@ function startGame(){
     pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
   };
 
-  rows=[]; videoChunks=[]; videoBlob=null; videoMimeType='video/webm'; videoExt='webm'; csvData=null; currentPhaseIdx=0; lastJumpPhaseIdx=-1;
+  rows=[]; videoChunks=[]; videoBlob=null; videoMimeType='video/webm'; videoExt='webm'; csvData=null;
+  currentPhase=null; phaseCount=0; phaseStart=0; phaseEnd=0;
 
   document.body.classList.add('playing');
   document.getElementById('start-screen').style.display='none';
@@ -350,7 +389,7 @@ function startGame(){
 
   const {w,h}=getCanvasSize();
   ball.x=w/2; ball.y=h/2;
-  setTrackVelocity(w);
+  startPhase(0,w,h,cfg.size);
 
   document.getElementById('webcam-pip').style.display='none';
   document.getElementById('pip-off').style.display='none';
@@ -358,7 +397,7 @@ function startGame(){
 
   startT=performance.now();
   lastFrameT=startT;
-  drawFrame(0,w,h,cfg.size,PHASES[0]);
+  drawFrame(0,w,h,cfg.size,currentPhase,phaseCount-1);
   animId=setInterval(runLoop,16);
   setTimeout(startWebcam,500);
 }
@@ -487,26 +526,21 @@ function loop(now){
   lastFrameT=now;
   const r=cfg.size;
 
-  const phaseIdx=Math.floor(elapsed/cfg.phaseDur)%PHASES.length;
-  const phase=PHASES[phaseIdx];
-  if(phaseIdx!==currentPhaseIdx){
-    currentPhaseIdx=phaseIdx;
-    if(phase.type==='track'){
-      setTrackVelocity(w);
-    }else if(phase.type==='hold'){
-      ball.vx=0;
-      ball.vy=0;
-    }else if(phase.type==='jump'){
-      jumpToRandomPosition(w,h,r);
-      lastJumpPhaseIdx=phaseIdx;
-    }
+  if(!currentPhase || elapsed>=phaseEnd){
+    startPhase(elapsed,w,h,r);
   }
+  const phase=currentPhase;
+  const phaseIdx=phaseCount-1;
 
   if(phase.type==='track'){
     const speedPx=(cfg.speed/100)*w;
-    const mag=Math.hypot(ball.vx,ball.vy) || 1;
-    ball.vx=(ball.vx/mag)*speedPx;
-    ball.vy=(ball.vy/mag)*speedPx;
+    if(trackPath.mode==='curve'){
+      trackPath.angle+=trackPath.turnRate*dt;
+    }else if(trackPath.mode==='random path'){
+      trackPath.angle+=randomBetween(-trackPath.wander,trackPath.wander)*dt;
+    }
+    ball.vx=Math.cos(trackPath.angle)*speedPx;
+    ball.vy=Math.sin(trackPath.angle)*speedPx;
     ball.x+=ball.vx*dt;
     ball.y+=ball.vy*dt;
     if(ball.x<r){  ball.x=r;   ball.vx= Math.abs(ball.vx); }
@@ -518,9 +552,7 @@ function loop(now){
     if(ball.x>w-r){ball.x=w-r; ball.vx=-Math.abs(ball.vx); }
     if(ball.y<r){  ball.y=r;   ball.vy= Math.abs(ball.vy); }
     if(ball.y>h-r){ball.y=h-r; ball.vy=-Math.abs(ball.vy); }
-  }else if(phase.type==='jump' && lastJumpPhaseIdx!==phaseIdx){
-    jumpToRandomPosition(w,h,r);
-    lastJumpPhaseIdx=phaseIdx;
+    trackPath.angle=Math.atan2(ball.vy,ball.vx);
   }
 
   rows.push({
@@ -531,7 +563,7 @@ function loop(now){
     ball_x_norm:   parseFloat((ball.x/w).toFixed(4)),
     ball_y_norm:   parseFloat((ball.y/h).toFixed(4)),
     phase:         phaseIdx+1,
-    phase_label:   phase.name,
+    phase_label:   phase.type==='track' ? phase.name+' - '+trackPath.mode : phase.name,
     canvas_w:      w,
     canvas_h:      h,
     participant_id:cfg.pid,
@@ -551,9 +583,10 @@ function drawFrame(elapsed,w,h,r,phase,phaseIdx=0){
   ctx.fill();
 
   const prog=(elapsed/cfg.duration)*100;
+  const label=phase.type==='track' ? phase.name+' - '+trackPath.mode : phase.name;
   document.getElementById('progress-bar').style.width=prog.toFixed(1)+'%';
   document.getElementById('hud-time').textContent=elapsed.toFixed(1)+' s / '+cfg.duration+' s';
-  document.getElementById('hud-phase').textContent='phase '+(phaseIdx+1)+' - '+phase.name;
+  document.getElementById('hud-phase').textContent='phase '+(phaseIdx+1)+' - '+label;
 }
 
 function stopGame(){
