@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Olai Track</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1318; color: #e8edf5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  #app { width: 100%; max-width: 860px; }
+
+  /* screens */
+  #game-screen, #end-screen { display: none; }
+
+  /* start screen */
+  .title { font-size: 28px; font-weight: 500; color: #eef2ff; margin-bottom: 6px; }
+  .sub { font-size: 14px; color: #8a9ab8; margin-bottom: 1.5rem; line-height: 1.6; max-width: 560px; }
+  .card { background: #161c27; border: 0.5px solid #2a3349; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .card-title { font-size: 13px; font-weight: 500; color: #8a9ab8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+  .row:last-child { margin-bottom: 0; }
+  label { font-size: 13px; color: #8a9ab8; min-width: 130px; }
+  input[type=number], input[type=text], select {
+    padding: 6px 10px; font-size: 13px;
+    border: 0.5px solid #2a3349; border-radius: 8px;
+    background: #0f1318; color: #e8edf5; outline: none;
+  }
+  input[type=number] { width: 90px; }
+  input[type=text] { width: 130px; }
+  select { width: 140px; cursor: pointer; }
+  input:focus, select:focus { border-color: #3a6aaa; }
+
+  /* buttons */
+  .btn { padding: 8px 20px; font-size: 14px; border-radius: 8px; border: 0.5px solid #2a3349; background: transparent; color: #e8edf5; cursor: pointer; transition: background 0.15s; }
+  .btn:hover { background: #1e2738; }
+  .btn-go { background: #1a7a4a; color: #fff; border-color: #1a7a4a; font-size: 15px; padding: 10px 32px; }
+  .btn-go:hover { background: #156040; }
+  .btn-stop { background: #7a2020; color: #fff; border-color: #7a2020; }
+  .btn-stop:hover { background: #601818; }
+
+  /* game area */
+  #game-area {
+    position: relative; width: 100%; aspect-ratio: 16/9;
+    background: #090d17; border-radius: 12px; overflow: hidden; margin-bottom: 1rem;
+    border: 0.5px solid #2a3349;
+  }
+  #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+  #webcam-pip {
+    position: absolute; bottom: 12px; right: 12px;
+    width: 22%; aspect-ratio: 4/3; border-radius: 8px;
+    overflow: hidden; border: 1.5px solid rgba(255,255,255,0.15); background: #000;
+  }
+  #webcam-pip video { width: 100%; height: 100%; object-fit: cover; }
+  #pip-off {
+    position: absolute; bottom: 12px; right: 12px;
+    width: 22%; aspect-ratio: 4/3; border-radius: 8px;
+    border: 1px dashed rgba(255,255,255,0.15);
+    display: none; align-items: center; justify-content: center;
+  }
+  #pip-off span { font-size: 11px; color: rgba(255,255,255,0.3); text-align: center; }
+  #hud { position: absolute; top: 10px; left: 14px; font-size: 13px; color: rgba(255,255,255,0.6); font-family: monospace; line-height: 1.6; }
+  #progress-bar-wrap { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgba(255,255,255,0.08); }
+  #progress-bar { height: 100%; background: #4ae08a; width: 0%; transition: width 0.1s linear; }
+
+  /* end screen */
+  .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .stat { background: #161c27; border: 0.5px solid #2a3349; border-radius: 8px; padding: 10px 16px; flex: 1; min-width: 110px; }
+  .stat-label { font-size: 11px; color: #8a9ab8; margin-bottom: 4px; }
+  .stat-val { font-size: 20px; font-weight: 500; color: #eef2ff; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  #cam-error { font-size: 12px; color: #e06a6a; margin-top: 6px; display: none; }
+  .hint { font-size: 12px; color: #5a6a88; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- START -->
+  <div id="start-screen">
+    <p class="title">Olai Track</p>
+    <p class="sub">Smooth pursuit task. Follow the moving ball with your eyes. Ball path exports as CSV; webcam records as WebM.</p>
+
+    <div class="card">
+      <p class="card-title">Session</p>
+      <div class="row"><label>Participant ID</label><input type="text" id="cfg-pid" value="P01"></div>
+      <div class="row"><label>Duration (seconds)</label><input type="number" id="cfg-duration" value="30" min="5" max="300"></div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Ball</p>
+      <div class="row">
+        <label>Speed</label>
+        <select id="cfg-speed">
+          <option value="1.5">Slow</option>
+          <option value="2.5" selected>Medium</option>
+          <option value="4.0">Fast</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Size</label>
+        <select id="cfg-size">
+          <option value="10">Small</option>
+          <option value="18" selected>Medium</option>
+          <option value="28">Large</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Phase duration (s)</label>
+        <input type="number" id="cfg-phase-dur" value="4" min="1" max="30">
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Webcam</p>
+      <div class="row">
+        <label>Record webcam</label>
+        <select id="cfg-webcam">
+          <option value="1">Yes</option>
+          <option value="0">No</option>
+        </select>
+      </div>
+      <div id="cam-error">Camera permission denied — set webcam to No or allow camera access and refresh.</div>
+      <p class="hint">Browser will prompt for camera permission on first run. WebM video downloads after the trial.</p>
+    </div>
+
+    <button class="btn btn-go" onclick="startGame()">Start task</button>
+  </div>
+
+  <!-- GAME -->
+  <div id="game-screen">
+    <div id="game-area">
+      <canvas id="game-canvas"></canvas>
+      <div id="webcam-pip"><video id="webcam-vid" autoplay muted playsinline></video></div>
+      <div id="pip-off"><span>webcam off</span></div>
+      <div id="hud">
+        <div id="hud-time">0.0 s</div>
+        <div id="hud-phase">phase 1 — right</div>
+      </div>
+      <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+    </div>
+    <button class="btn btn-stop" onclick="stopGame()">Stop &amp; export</button>
+  </div>
+
+  <!-- END -->
+  <div id="end-screen">
+    <p class="title" style="margin-bottom:1rem">Trial complete</p>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-label">Frames logged</div><div class="stat-val" id="stat-frames">—</div></div>
+      <div class="stat"><div class="stat-label">Duration</div><div class="stat-val" id="stat-dur">—</div></div>
+      <div class="stat"><div class="stat-label">Participant</div><div class="stat-val" id="stat-pid">—</div></div>
+      <div class="stat"><div class="stat-label">Webcam</div><div class="stat-val" id="stat-cam">—</div></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-go" onclick="downloadCSV()">&#8595; Download CSV</button>
+      <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download WebM</button>
+      <button class="btn" onclick="resetToStart()">New trial</button>
+    </div>
+    <p class="hint" style="margin-top:1rem">CSV columns: timestamp_ms, elapsed_s, ball_x, ball_y, ball_x_norm, ball_y_norm, phase, phase_label, canvas_w, canvas_h, participant_id</p>
+  </div>
+
+</div>
+<script>
+const PHASES=[
+  {name:'right',      angle:0},
+  {name:'down-right', angle:Math.PI*0.25},
+  {name:'down',       angle:Math.PI*0.5},
+  {name:'down-left',  angle:Math.PI*0.75},
+  {name:'left',       angle:Math.PI},
+  {name:'up-left',    angle:Math.PI*1.25},
+  {name:'up',         angle:Math.PI*1.5},
+  {name:'up-right',   angle:Math.PI*1.75},
+];
+
+let cfg={};
+let animId=null;
+let startT=null;
+let rows=[];
+let ball={x:0,y:0,vx:0,vy:0};
+let currentPhaseIdx=0;
+let stream=null;
+let mediaRec=null;
+let videoChunks=[];
+let videoBlob=null;
+let csvData=null;
+let canvas, ctx;
+
+function getCanvasSize(){
+  const area=document.getElementById('game-area');
+  return {w:area.clientWidth, h:area.clientHeight};
+}
+
+function resizeCanvas(){
+  const {w,h}=getCanvasSize();
+  canvas.width=w; canvas.height=h;
+}
+
+async function startGame(){
+  cfg={
+    duration:  parseInt(document.getElementById('cfg-duration').value)  || 30,
+    speed:     parseFloat(document.getElementById('cfg-speed').value),
+    size:      parseInt(document.getElementById('cfg-size').value),
+    phaseDur:  parseInt(document.getElementById('cfg-phase-dur').value) || 4,
+    webcam:    parseInt(document.getElementById('cfg-webcam').value),
+    pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
+  };
+
+  rows=[]; videoChunks=[]; videoBlob=null; csvData=null; currentPhaseIdx=0;
+
+  document.getElementById('start-screen').style.display='none';
+  document.getElementById('game-screen').style.display='block';
+  document.getElementById('end-screen').style.display='none';
+  document.getElementById('cam-error').style.display='none';
+
+  canvas=document.getElementById('game-canvas');
+  ctx=canvas.getContext('2d');
+  resizeCanvas();
+
+  const {w,h}=getCanvasSize();
+  ball.x=w/2; ball.y=h/2;
+  const a=PHASES[0].angle;
+  ball.vx=Math.cos(a)*cfg.speed;
+  ball.vy=Math.sin(a)*cfg.speed;
+
+  document.getElementById('webcam-pip').style.display='none';
+  document.getElementById('pip-off').style.display='none';
+  stream=null; mediaRec=null;
+
+  if(cfg.webcam){
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+      const vid=document.getElementById('webcam-vid');
+      vid.srcObject=stream;
+      document.getElementById('webcam-pip').style.display='block';
+      const mimeType=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
+        .find(t=>MediaRecorder.isTypeSupported(t)) || '';
+      try{
+        const mr=new MediaRecorder(stream, mimeType?{mimeType}:{});
+        mr.ondataavailable=e=>{if(e.data&&e.data.size>0) videoChunks.push(e.data);};
+        mr.start(500);
+        mediaRec=mr;
+      }catch(e){ mediaRec=null; }
+    }catch(e){
+      cfg.webcam=0;
+      document.getElementById('pip-off').style.display='flex';
+      document.getElementById('cam-error').style.display='block';
+    }
+  }else{
+    document.getElementById('pip-off').style.display='flex';
+  }
+
+  startT=performance.now();
+  animId=requestAnimationFrame(loop);
+}
+
+function loop(now){
+  const elapsed=(now-startT)/1000;
+  if(elapsed>=cfg.duration){ stopGame(); return; }
+
+  const {w,h}=getCanvasSize();
+  if(canvas.width!==w||canvas.height!==h) resizeCanvas();
+
+  const phaseIdx=Math.floor(elapsed/cfg.phaseDur)%PHASES.length;
+  if(phaseIdx!==currentPhaseIdx){
+    currentPhaseIdx=phaseIdx;
+    const a=PHASES[phaseIdx].angle;
+    ball.vx=Math.cos(a)*cfg.speed;
+    ball.vy=Math.sin(a)*cfg.speed;
+  }
+
+  ball.x+=ball.vx; ball.y+=ball.vy;
+  const r=cfg.size;
+  if(ball.x<r){  ball.x=r;   ball.vx= Math.abs(ball.vx); }
+  if(ball.x>w-r){ball.x=w-r; ball.vx=-Math.abs(ball.vx); }
+  if(ball.y<r){  ball.y=r;   ball.vy= Math.abs(ball.vy); }
+  if(ball.y>h-r){ball.y=h-r; ball.vy=-Math.abs(ball.vy); }
+
+  rows.push({
+    timestamp_ms:  Math.round(now-startT),
+    elapsed_s:     parseFloat(elapsed.toFixed(3)),
+    ball_x:        parseFloat(ball.x.toFixed(2)),
+    ball_y:        parseFloat(ball.y.toFixed(2)),
+    ball_x_norm:   parseFloat((ball.x/w).toFixed(4)),
+    ball_y_norm:   parseFloat((ball.y/h).toFixed(4)),
+    phase:         phaseIdx+1,
+    phase_label:   PHASES[phaseIdx].name,
+    canvas_w:      w,
+    canvas_h:      h,
+    participant_id:cfg.pid,
+  });
+
+  ctx.fillStyle='#090d17';
+  ctx.fillRect(0,0,w,h);
+
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,r,0,Math.PI*2);
+  ctx.fillStyle='#4ae08a';
+  ctx.fill();
+
+  const prog=(elapsed/cfg.duration)*100;
+  document.getElementById('progress-bar').style.width=prog.toFixed(1)+'%';
+  document.getElementById('hud-time').textContent=elapsed.toFixed(1)+' s / '+cfg.duration+' s';
+  document.getElementById('hud-phase').textContent='phase '+(phaseIdx+1)+' — '+PHASES[phaseIdx].name;
+
+  animId=requestAnimationFrame(loop);
+}
+
+function stopGame(){
+  if(animId){ cancelAnimationFrame(animId); animId=null; }
+
+  if(mediaRec&&mediaRec.state!=='inactive'){
+    mediaRec.onstop=()=>{ videoBlob=new Blob(videoChunks,{type:'video/webm'}); };
+    mediaRec.stop();
+  }
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+
+  const dur=rows.length ? rows[rows.length-1].elapsed_s : 0;
+  document.getElementById('stat-frames').textContent=rows.length.toLocaleString();
+  document.getElementById('stat-dur').textContent=dur.toFixed(1)+' s';
+  document.getElementById('stat-pid').textContent=cfg.pid;
+  document.getElementById('stat-cam').textContent=cfg.webcam?'recorded':'off';
+  document.getElementById('dl-video-btn').style.display=cfg.webcam?'inline-flex':'none';
+
+  const cols=['timestamp_ms','elapsed_s','ball_x','ball_y','ball_x_norm','ball_y_norm',
+              'phase','phase_label','canvas_w','canvas_h','participant_id'];
+  const lines=[cols.join(','), ...rows.map(r=>cols.map(c=>r[c]).join(','))];
+  csvData=lines.join('\n');
+
+  document.getElementById('game-screen').style.display='none';
+  document.getElementById('end-screen').style.display='block';
+}
+
+function downloadCSV(){
+  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  triggerDownload(new Blob([csvData],{type:'text/csv'}), `olai_track_${cfg.pid}_${ts}.csv`);
+}
+
+function downloadVideo(){
+  if(!videoBlob){ setTimeout(downloadVideo,300); return; }
+  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  triggerDownload(videoBlob, `olai_webcam_${cfg.pid}_${ts}.webm`);
+}
+
+function triggerDownload(blob,filename){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },2000);
+}
+
+function resetToStart(){
+  document.getElementById('end-screen').style.display='none';
+  document.getElementById('start-screen').style.display='block';
+}
+
+window.addEventListener('resize',()=>{ if(canvas) resizeCanvas(); });
+</script>
+</body>
+</html>
