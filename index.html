@@ -158,9 +158,16 @@
           <option value="best">Best available</option>
         </select>
       </div>
+      <div class="row">
+        <label>Video format</label>
+        <select id="cfg-video-format">
+          <option value="webm" selected>WebM</option>
+          <option value="mp4">MP4 if supported</option>
+        </select>
+      </div>
       <div id="cam-error">Camera permission denied - set webcam to No or allow camera access and refresh.</div>
       <p class="hint" id="cam-info">Camera settings appear here after permission is granted.</p>
-      <p class="hint">Browser will prompt for camera permission on first run. WebM video downloads after the trial.</p>
+      <p class="hint">Browser will prompt for camera permission on first run. Video downloads after the trial.</p>
     </div>
 
     <button class="btn btn-go" onclick="startGame()">Start task</button>
@@ -193,7 +200,7 @@
     </div>
     <div class="btn-row">
       <button class="btn btn-go" onclick="downloadCSV()">&#8595; Download CSV</button>
-      <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download WebM</button>
+      <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download Video</button>
       <button class="btn" onclick="resetToStart()">New trial</button>
     </div>
     <p class="hint" style="margin-top:1rem">CSV columns: timestamp_ms, elapsed_s, ball_x, ball_y, ball_x_norm, ball_y_norm, phase, phase_label, canvas_w, canvas_h, participant_id</p>
@@ -219,6 +226,8 @@ let stream=null;
 let mediaRec=null;
 let videoChunks=[];
 let videoBlob=null;
+let videoMimeType='video/webm';
+let videoExt='webm';
 let csvData=null;
 let canvas, ctx;
 
@@ -321,10 +330,11 @@ function startGame(){
     selfie:    parseInt(document.getElementById('cfg-selfie').value),
     cameraFacing: document.getElementById('cfg-camera-facing').value,
     camQuality: document.getElementById('cfg-cam-quality').value,
+    videoFormat: document.getElementById('cfg-video-format').value,
     pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
   };
 
-  rows=[]; videoChunks=[]; videoBlob=null; csvData=null; currentPhaseIdx=0; lastJumpPhaseIdx=-1;
+  rows=[]; videoChunks=[]; videoBlob=null; videoMimeType='video/webm'; videoExt='webm'; csvData=null; currentPhaseIdx=0; lastJumpPhaseIdx=-1;
 
   document.body.classList.add('playing');
   document.getElementById('start-screen').style.display='none';
@@ -376,9 +386,10 @@ async function startWebcam(){
       const vid=document.getElementById('webcam-vid');
       vid.srcObject=stream;
       document.getElementById('webcam-pip').style.display=cfg.selfie?'block':'none';
+      const mimeType=selectVideoMimeType();
+      videoMimeType=mimeType || 'video/webm';
+      videoExt=videoMimeType.indexOf('mp4')>=0 ? 'mp4' : 'webm';
       updateCameraInfo(stream);
-      const mimeType=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
-        .find(t=>MediaRecorder.isTypeSupported(t)) || '';
       try{
         const mr=new MediaRecorder(stream, mimeType?{mimeType}:{});
         mr.ondataavailable=e=>{if(e.data&&e.data.size>0) videoChunks.push(e.data);};
@@ -393,6 +404,13 @@ async function startWebcam(){
   }else{
     document.getElementById('pip-off').style.display='none';
   }
+}
+
+function selectVideoMimeType(){
+  const mp4Types=['video/mp4;codecs=h264','video/mp4;codecs=avc1','video/mp4'];
+  const webmTypes=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  const preferred=cfg.videoFormat==='mp4' ? mp4Types.concat(webmTypes) : webmTypes.concat(mp4Types);
+  return preferred.find(t=>MediaRecorder.isTypeSupported(t)) || '';
 }
 
 async function openCameraStream(){
@@ -454,7 +472,8 @@ function updateCameraInfo(mediaStream){
   if(caps.frameRate) maxParts.push('max '+Math.round(caps.frameRate.max)+' fps');
 
   const info=actual || 'active';
-  document.getElementById('cam-info').textContent=fallbackNote+'Camera capture: '+info+(maxParts.length ? ' ('+maxParts.join(', ')+')' : '');
+  const format=videoExt.toUpperCase();
+  document.getElementById('cam-info').textContent=fallbackNote+'Camera capture: '+info+'; recording '+format+(maxParts.length ? ' ('+maxParts.join(', ')+')' : '');
 }
 
 function loop(now){
@@ -541,7 +560,7 @@ function stopGame(){
   if(animId){ clearInterval(animId); animId=null; }
 
   if(mediaRec&&mediaRec.state!=='inactive'){
-    mediaRec.onstop=()=>{ videoBlob=new Blob(videoChunks,{type:'video/webm'}); };
+    mediaRec.onstop=()=>{ videoBlob=new Blob(videoChunks,{type:videoMimeType}); };
     mediaRec.stop();
   }
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
@@ -571,7 +590,7 @@ function downloadCSV(){
 function downloadVideo(){
   if(!videoBlob){ setTimeout(downloadVideo,300); return; }
   const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-  triggerDownload(videoBlob, `olai_webcam_${cfg.pid}_${ts}.webm`);
+  triggerDownload(videoBlob, `olai_webcam_${cfg.pid}_${ts}.${videoExt}`);
 }
 
 function triggerDownload(blob,filename){
