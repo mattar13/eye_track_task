@@ -162,6 +162,7 @@
       <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
     </div>
     <button class="btn btn-stop" onclick="stopGame()">Stop &amp; export</button>
+    <div id="runtime-error" class="hint" style="display:none;color:#e06a6a;margin-top:0.5rem"></div>
   </div>
 
   <!-- END -->
@@ -293,6 +294,7 @@ function jumpToRandomPosition(w,h,r){
 }
 
 function startGame(){
+  if(animId){ clearInterval(animId); animId=null; }
   cfg={
     duration:  parseInt(document.getElementById('cfg-duration').value)  || 30,
     speed:     parseFloat(document.getElementById('cfg-speed').value),
@@ -310,6 +312,7 @@ function startGame(){
   document.getElementById('game-screen').style.display='block';
   document.getElementById('end-screen').style.display='none';
   document.getElementById('cam-error').style.display='none';
+  document.getElementById('runtime-error').style.display='none';
 
   canvas=document.getElementById('game-canvas');
   ctx=canvas.getContext('2d');
@@ -326,8 +329,19 @@ function startGame(){
   startT=performance.now();
   lastFrameT=startT;
   drawFrame(0,w,h,cfg.size,PHASES[0]);
-  animId=requestAnimationFrame(loop);
+  animId=setInterval(runLoop,16);
   setTimeout(startWebcam,500);
+}
+
+function runLoop(){
+  try{
+    loop(performance.now());
+  }catch(e){
+    if(animId){ clearInterval(animId); animId=null; }
+    const err=document.getElementById('runtime-error');
+    err.textContent='Runtime error: '+(e&&e.message?e.message:String(e));
+    err.style.display='block';
+  }
 }
 
 async function startWebcam(){
@@ -423,7 +437,6 @@ function loop(now){
 
   drawFrame(elapsed,w,h,r,phase,phaseIdx);
 
-  animId=requestAnimationFrame(loop);
 }
 
 function drawFrame(elapsed,w,h,r,phase,phaseIdx=0){
@@ -442,7 +455,7 @@ function drawFrame(elapsed,w,h,r,phase,phaseIdx=0){
 }
 
 function stopGame(){
-  if(animId){ cancelAnimationFrame(animId); animId=null; }
+  if(animId){ clearInterval(animId); animId=null; }
 
   if(mediaRec&&mediaRec.state!=='inactive'){
     mediaRec.onstop=()=>{ videoBlob=new Blob(videoChunks,{type:'video/webm'}); };
