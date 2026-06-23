@@ -201,6 +201,7 @@
     </div>
     <div class="btn-row">
       <button class="btn btn-go" onclick="downloadCSV()">&#8595; Download CSV</button>
+      <button class="btn" onclick="downloadMetadataCSV()">&#8595; Download Metadata CSV</button>
       <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download Video</button>
       <button class="btn" onclick="resetToStart()">New trial</button>
     </div>
@@ -236,6 +237,14 @@ let videoBlob=null;
 let videoMimeType='video/webm';
 let videoExt='webm';
 let csvData=null;
+let metadataRows=[];
+let metadataCsvData=null;
+let cameraSettings={};
+let cameraCapabilities={};
+let cameraFrameSamples=[];
+let cameraFrameMonitorActive=false;
+let metadataFinalized=false;
+let cameraMetadataCollected=false;
 let canvas, ctx;
 
 function getCanvasSize(){
@@ -376,7 +385,8 @@ function startGame(){
     pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
   };
 
-  rows=[]; videoChunks=[]; videoBlob=null; videoMimeType='video/webm'; videoExt='webm'; csvData=null;
+  rows=[]; videoChunks=[]; videoBlob=null; videoMimeType='video/webm'; videoExt='webm'; csvData=null; metadataCsvData=null;
+  metadataRows=[]; cameraSettings={}; cameraCapabilities={}; cameraFrameSamples=[]; cameraFrameMonitorActive=false; metadataFinalized=false; cameraMetadataCollected=false;
   currentPhase=null; phaseCount=0; phaseStart=0; phaseEnd=0;
 
   document.body.classList.add('playing');
@@ -402,6 +412,7 @@ function startGame(){
   recordingStartDate=new Date();
   recordingStartIso=recordingStartDate.toISOString();
   recordingStartEpochMs=recordingStartDate.getTime();
+  collectBaseMetadata();
   startT=performance.now();
   lastFrameT=startT;
   drawFrame(0,w,h,cfg.size,currentPhase,phaseCount-1);
@@ -436,6 +447,8 @@ async function startWebcam(){
       videoMimeType=mimeType || 'video/webm';
       videoExt=videoMimeType.indexOf('mp4')>=0 ? 'mp4' : 'webm';
       updateCameraInfo(stream);
+      collectCameraMetadata(stream);
+      startCameraFrameMonitor(vid);
       try{
         const mr=new MediaRecorder(stream, mimeType?{mimeType}:{});
         mr.ondataavailable=e=>{if(e.data&&e.data.size>0) videoChunks.push(e.data);};
@@ -522,6 +535,159 @@ function updateCameraInfo(mediaStream){
   document.getElementById('cam-info').textContent=fallbackNote+'Camera capture: '+info+'; recording '+format+(maxParts.length ? ' ('+maxParts.join(', ')+')' : '');
 }
 
+function addMetadata(category,field,value,unit='',source='browser',available=true,note=''){
+  metadataRows.push({
+    category,
+    field,
+    value: value===undefined || value===null || value==='' ? 'unavailable' : value,
+    unit,
+    source,
+    available: available ? 'yes' : 'no',
+    note,
+  });
+}
+
+function collectBaseMetadata(){
+  addMetadata('session','recording_start_iso',recordingStartIso,'','app');
+  addMetadata('session','recording_start_epoch_ms',recordingStartEpochMs,'ms','app');
+  addMetadata('session','participant_id',cfg.pid,'','app');
+  addMetadata('session','capture_api','getUserMedia + MediaRecorder','','browser');
+  addMetadata('session','requested_capture_mode',cfg.camQuality,'','app');
+  addMetadata('session','requested_video_format',cfg.videoFormat,'','app');
+  addMetadata('device','user_agent',navigator.userAgent,'','browser');
+  addMetadata('device','platform',navigator.platform || 'unavailable','','browser',!!navigator.platform);
+  addMetadata('device','os_version','unavailable','','browser',false,'Not exposed reliably by browser getUserMedia.');
+  addMetadata('device','device_model','unavailable','','browser',false,'Not exposed reliably by browser getUserMedia.');
+  addMetadata('device','camera_hardware_level','unavailable','','browser',false,'Native Camera2/AVFoundation metadata is not exposed to browser JavaScript.');
+  addMetadata('display','screen_width',screen.width,'px','browser');
+  addMetadata('display','screen_height',screen.height,'px','browser');
+  addMetadata('display','device_pixel_ratio',window.devicePixelRatio,'','browser');
+}
+
+function collectCameraMetadata(mediaStream){
+  const track=mediaStream.getVideoTracks()[0];
+  if(!track) return;
+  cameraMetadataCollected=true;
+  cameraSettings=track.getSettings ? track.getSettings() : {};
+  cameraCapabilities=track.getCapabilities ? track.getCapabilities() : {};
+  const width=cameraSettings.width || '';
+  const height=cameraSettings.height || '';
+  const aspect=width&&height ? (width/height).toFixed(6) : '';
+
+  addMetadata('camera','track_label',track.label || 'unavailable','','browser',!!track.label);
+  addMetadata('camera','facing_mode',cameraSettings.facingMode || cfg.cameraFacing || 'unavailable','','browser',!!(cameraSettings.facingMode || cfg.cameraFacing));
+  addMetadata('camera','capture_width',width,'px','browser',!!width);
+  addMetadata('camera','capture_height',height,'px','browser',!!height);
+  addMetadata('camera','aspect_ratio',aspect,'','derived',!!aspect);
+  addMetadata('camera','reported_frame_rate',cameraSettings.frameRate || 'unavailable','fps','browser',!!cameraSettings.frameRate,'Track setting, not measured realized fps.');
+  addMetadata('camera','mirrored_preview',cfg.selfie&&((cameraSettings.facingMode || cfg.cameraFacing)==='user') ? 'likely yes' : 'unknown','','derived',true,'Browser video frames are not guaranteed mirrored; this logs preview expectation only.');
+  addMetadata('camera','sensor_orientation_rotation_applied','unavailable','','browser',false,'Not exposed by getUserMedia.');
+  addMetadata('camera','recording_mime_type',videoMimeType,'','MediaRecorder');
+  addMetadata('camera','recording_extension',videoExt,'','app');
+
+  addCapabilityMetadata('frame_rate',cameraCapabilities.frameRate,'fps');
+  addCapabilityMetadata('width',cameraCapabilities.width,'px');
+  addCapabilityMetadata('height',cameraCapabilities.height,'px');
+  addCapabilityMetadata('zoom',cameraCapabilities.zoom,'x');
+  addCapabilityMetadata('exposure_time',cameraCapabilities.exposureTime,'ms');
+  addCapabilityMetadata('iso',cameraCapabilities.iso,'ISO');
+  addCapabilityMetadata('focus_distance',cameraCapabilities.focusDistance,'m');
+  addCapabilityMetadata('white_balance_mode',cameraCapabilities.whiteBalanceMode,'');
+
+  addUnavailableNativeMetadata();
+}
+
+function collectNoCameraMetadata(reason){
+  addMetadata('camera','camera_metadata_status','unavailable','','browser',false,reason);
+  addMetadata('camera','capture_width','unavailable','px','browser',false,reason);
+  addMetadata('camera','capture_height','unavailable','px','browser',false,reason);
+  addMetadata('camera','aspect_ratio','unavailable','','derived',false,reason);
+  addMetadata('camera','reported_frame_rate','unavailable','fps','browser',false,reason);
+  addMetadata('camera','facing_mode','unavailable','','browser',false,reason);
+  addMetadata('camera','mirrored_preview','unavailable','','derived',false,reason);
+  addMetadata('timing','camera_per_frame_timestamp','unavailable','','browser',false,reason);
+  addMetadata('timing','realized_camera_fps','unavailable','fps','browser',false,reason);
+  addUnavailableNativeMetadata();
+}
+
+function addCapabilityMetadata(name,capability,unit){
+  if(!capability){
+    addMetadata('capability',name,'unavailable',unit,'browser',false,'Capability not exposed by this browser/device.');
+    return;
+  }
+  if(Array.isArray(capability)){
+    addMetadata('capability',name,capability.join('|'),unit,'browser');
+  }else{
+    addMetadata('capability',name+'_min',capability.min,unit,'browser',capability.min!==undefined);
+    addMetadata('capability',name+'_max',capability.max,unit,'browser',capability.max!==undefined);
+    addMetadata('capability',name+'_step',capability.step,unit,'browser',capability.step!==undefined);
+  }
+}
+
+function addUnavailableNativeMetadata(){
+  const fields=[
+    ['intrinsics','focal_length_px'],
+    ['intrinsics','focal_length_mm'],
+    ['intrinsics','principal_point_x'],
+    ['intrinsics','principal_point_y'],
+    ['intrinsics','horizontal_fov'],
+    ['intrinsics','vertical_fov'],
+    ['intrinsics','lens_distortion_coefficients'],
+    ['sensor','physical_sensor_width'],
+    ['sensor','physical_sensor_height'],
+    ['sensor','pixel_pitch'],
+    ['sensor','active_array_size'],
+    ['sensor','cropped_output_size'],
+    ['quality','exposure_duration'],
+    ['quality','iso_gain'],
+    ['quality','focus_distance_actual'],
+    ['quality','autofocus_locked'],
+    ['quality','white_balance_mode_actual'],
+    ['quality','digital_zoom_active'],
+    ['quality','hdr_or_computational_mode'],
+  ];
+  fields.forEach(([category,field])=>{
+    addMetadata(category,field,'unavailable','','browser',false,'Requires native Camera2/AVFoundation or vendor-specific APIs; not exposed by getUserMedia.');
+  });
+}
+
+function startCameraFrameMonitor(video){
+  cameraFrameMonitorActive=true;
+  if(!video.requestVideoFrameCallback){
+    addMetadata('timing','camera_per_frame_timestamp','unavailable','','browser',false,'requestVideoFrameCallback is not supported by this browser.');
+    addMetadata('timing','realized_camera_fps','unavailable','fps','browser',false,'Cannot measure camera frame timestamps without requestVideoFrameCallback.');
+    return;
+  }
+
+  const onFrame=(now,metadata)=>{
+    if(!cameraFrameMonitorActive || !stream) return;
+    if(cameraFrameSamples.length<1000){
+      cameraFrameSamples.push({
+        index: cameraFrameSamples.length,
+        presentation_time_s: metadata.presentationTime!==undefined ? metadata.presentationTime/1000 : '',
+        media_time_s: metadata.mediaTime!==undefined ? metadata.mediaTime : '',
+        expected_display_time_s: metadata.expectedDisplayTime!==undefined ? metadata.expectedDisplayTime/1000 : '',
+        width: metadata.width || cameraSettings.width || '',
+        height: metadata.height || cameraSettings.height || '',
+        presented_frames: metadata.presentedFrames || '',
+      });
+    }
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
+}
+
+function realizedCameraFps(){
+  if(cameraFrameSamples.length<2) return '';
+  const first=cameraFrameSamples[0];
+  const last=cameraFrameSamples[cameraFrameSamples.length-1];
+  const start=first.media_time_s || first.presentation_time_s;
+  const end=last.media_time_s || last.presentation_time_s;
+  const dt=end-start;
+  if(!dt || dt<=0) return '';
+  return ((cameraFrameSamples.length-1)/dt).toFixed(3);
+}
+
 function loop(now){
   const elapsed=(now-startT)/1000;
   if(elapsed>=cfg.duration){ stopGame(); return; }
@@ -600,6 +766,7 @@ function drawFrame(elapsed,w,h,r,phase,phaseIdx=0){
 
 function stopGame(){
   if(animId){ clearInterval(animId); animId=null; }
+  cameraFrameMonitorActive=false;
 
   if(mediaRec&&mediaRec.state!=='inactive'){
     mediaRec.onstop=()=>{ videoBlob=new Blob(videoChunks,{type:videoMimeType}); };
@@ -620,6 +787,7 @@ function stopGame(){
               'phase','phase_label','canvas_w','canvas_h','participant_id'];
   const lines=[cols.join(','), ...rows.map(r=>cols.map(c=>r[c]).join(','))];
   csvData=lines.join('\n');
+  metadataCsvData=buildMetadataCSV();
 
   document.body.classList.remove('playing');
   document.getElementById('game-screen').style.display='none';
@@ -635,6 +803,46 @@ function downloadVideo(){
   if(!videoBlob){ setTimeout(downloadVideo,300); return; }
   const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
   triggerDownload(videoBlob, `olai_webcam_${cfg.pid}_${ts}.${videoExt}`);
+}
+
+function csvEscape(value){
+  const s=String(value===undefined || value===null ? '' : value);
+  return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+
+function buildMetadataCSV(){
+  if(!metadataFinalized){
+    if(!cameraMetadataCollected){
+      collectNoCameraMetadata(cfg.webcam ? 'Camera permission failed or stream did not start.' : 'Webcam recording disabled for this session.');
+    }
+    const fps=realizedCameraFps();
+    if(fps){
+      addMetadata('timing','realized_camera_fps',fps,'fps','requestVideoFrameCallback');
+    }
+    addMetadata('timing','camera_frame_samples_count',cameraFrameSamples.length,'frames','requestVideoFrameCallback',cameraFrameSamples.length>0);
+    metadataFinalized=true;
+  }
+
+  const metadataCols=['section','category','field','value','unit','source','available','note'];
+  const frameCols=['section','index','presentation_time_s','media_time_s','expected_display_time_s','width','height','presented_frames'];
+  const lines=[
+    metadataCols.join(','),
+    ...metadataRows.map(r=>[
+      'metadata',r.category,r.field,r.value,r.unit,r.source,r.available,r.note,
+    ].map(csvEscape).join(',')),
+    '',
+    frameCols.join(','),
+    ...cameraFrameSamples.map(r=>[
+      'camera_frame',r.index,r.presentation_time_s,r.media_time_s,r.expected_display_time_s,r.width,r.height,r.presented_frames,
+    ].map(csvEscape).join(',')),
+  ];
+  return lines.join('\n');
+}
+
+function downloadMetadataCSV(){
+  if(!metadataCsvData) metadataCsvData=buildMetadataCSV();
+  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  triggerDownload(new Blob([metadataCsvData],{type:'text/csv'}), `olai_metadata_${cfg.pid}_${ts}.csv`);
 }
 
 function triggerDownload(blob,filename){
