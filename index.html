@@ -142,7 +142,24 @@
           <option value="0">No</option>
         </select>
       </div>
+      <div class="row">
+        <label>Camera preference</label>
+        <select id="cfg-camera-facing">
+          <option value="user" selected>Selfie/front</option>
+          <option value="">Browser default</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Capture mode</label>
+        <select id="cfg-cam-quality">
+          <option value="standard" selected>Standard</option>
+          <option value="highfps">High speed</option>
+          <option value="highres">High resolution</option>
+          <option value="best">Best available</option>
+        </select>
+      </div>
       <div id="cam-error">Camera permission denied - set webcam to No or allow camera access and refresh.</div>
+      <p class="hint" id="cam-info">Camera settings appear here after permission is granted.</p>
       <p class="hint">Browser will prompt for camera permission on first run. WebM video downloads after the trial.</p>
     </div>
 
@@ -302,6 +319,8 @@ function startGame(){
     phaseDur:  parseInt(document.getElementById('cfg-phase-dur').value) || 4,
     webcam:    parseInt(document.getElementById('cfg-webcam').value),
     selfie:    parseInt(document.getElementById('cfg-selfie').value),
+    cameraFacing: document.getElementById('cfg-camera-facing').value,
+    camQuality: document.getElementById('cfg-cam-quality').value,
     pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
   };
 
@@ -313,6 +332,7 @@ function startGame(){
   document.getElementById('end-screen').style.display='none';
   document.getElementById('cam-error').style.display='none';
   document.getElementById('runtime-error').style.display='none';
+  document.getElementById('cam-info').textContent='Camera settings appear here after permission is granted.';
 
   canvas=document.getElementById('game-canvas');
   ctx=canvas.getContext('2d');
@@ -347,7 +367,7 @@ function runLoop(){
 async function startWebcam(){
   if(cfg.webcam){
     try{
-      stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+      stream=await openCameraStream();
       if(!animId){
         stream.getTracks().forEach(t=>t.stop());
         stream=null;
@@ -356,6 +376,7 @@ async function startWebcam(){
       const vid=document.getElementById('webcam-vid');
       vid.srcObject=stream;
       document.getElementById('webcam-pip').style.display=cfg.selfie?'block':'none';
+      updateCameraInfo(stream);
       const mimeType=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
         .find(t=>MediaRecorder.isTypeSupported(t)) || '';
       try{
@@ -372,6 +393,68 @@ async function startWebcam(){
   }else{
     document.getElementById('pip-off').style.display='none';
   }
+}
+
+async function openCameraStream(){
+  try{
+    return await navigator.mediaDevices.getUserMedia({video:cameraConstraints(),audio:false});
+  }catch(e){
+    if(cfg.camQuality==='standard') throw e;
+    const original=cfg.camQuality;
+    cfg.camQuality='standard';
+    try{
+      const fallback=await navigator.mediaDevices.getUserMedia({video:cameraConstraints(),audio:false});
+      document.getElementById('cam-info').textContent='Requested '+original+' capture, device fell back to standard.';
+      return fallback;
+    }catch(fallbackError){
+      throw e;
+    }
+  }
+}
+
+function cameraConstraints(){
+  const video={};
+  if(cfg.cameraFacing) video.facingMode={ideal:cfg.cameraFacing};
+
+  if(cfg.camQuality==='highfps'){
+    video.width={ideal:640};
+    video.height={ideal:480};
+    video.frameRate={ideal:60, min:30};
+  }else if(cfg.camQuality==='highres'){
+    video.width={ideal:1280};
+    video.height={ideal:720};
+    video.frameRate={ideal:30};
+  }else if(cfg.camQuality==='best'){
+    video.width={ideal:1920};
+    video.height={ideal:1080};
+    video.frameRate={ideal:60};
+  }else{
+    video.width={ideal:640};
+    video.height={ideal:480};
+    video.frameRate={ideal:30};
+  }
+
+  return video;
+}
+
+function updateCameraInfo(mediaStream){
+  const track=mediaStream.getVideoTracks()[0];
+  if(!track) return;
+  const previous=document.getElementById('cam-info').textContent;
+  const fallbackNote=previous.indexOf('fell back')>=0 ? previous+' ' : '';
+  const settings=track.getSettings ? track.getSettings() : {};
+  const caps=track.getCapabilities ? track.getCapabilities() : {};
+  const actual=[
+    settings.width&&settings.height ? settings.width+'x'+settings.height : null,
+    settings.frameRate ? Math.round(settings.frameRate)+' fps' : null,
+  ].filter(Boolean).join(' @ ');
+
+  const maxParts=[];
+  if(caps.width&&caps.height) maxParts.push('max '+caps.width.max+'x'+caps.height.max);
+  if(caps.frameRate) maxParts.push('max '+Math.round(caps.frameRate.max)+' fps');
+
+  const info=actual || 'active';
+  document.getElementById('cam-info').textContent=fallbackNote+'Camera capture: '+info+(maxParts.length ? ' ('+maxParts.join(', ')+')' : '');
 }
 
 function loop(now){
