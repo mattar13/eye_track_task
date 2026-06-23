@@ -6,11 +6,12 @@
 <title>Olai Track</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1318; color: #e8edf5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-  #app { width: 100%; max-width: 860px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1318; color: #e8edf5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 0.75rem; }
+  #app { width: 100%; max-width: 1180px; }
 
   /* screens */
   #game-screen, #end-screen { display: none; }
+  #start-screen, #end-screen { max-width: 860px; margin: 0 auto; }
 
   /* start screen */
   .title { font-size: 28px; font-weight: 500; color: #eef2ff; margin-bottom: 6px; }
@@ -40,7 +41,7 @@
 
   /* game area */
   #game-area {
-    position: relative; width: 100%; aspect-ratio: 16/9;
+    position: relative; width: 100%; height: min(78vh, 760px); min-height: 360px;
     background: #090d17; border-radius: 12px; overflow: hidden; margin-bottom: 1rem;
     border: 0.5px solid #2a3349;
   }
@@ -71,6 +72,17 @@
 
   #cam-error { font-size: 12px; color: #e06a6a; margin-top: 6px; display: none; }
   .hint { font-size: 12px; color: #5a6a88; margin-top: 8px; }
+
+  @media (max-width: 640px) {
+    body { padding: 0.5rem; align-items: stretch; }
+    #app { max-width: none; }
+    #game-area { height: 72vh; min-height: 420px; }
+    #webcam-pip, #pip-off { width: 34%; bottom: 8px; right: 8px; }
+  }
+
+  @media (max-height: 520px) {
+    #game-area { height: calc(100vh - 96px); min-height: 240px; }
+  }
 </style>
 </head>
 <body>
@@ -120,7 +132,14 @@
           <option value="0">No</option>
         </select>
       </div>
-      <div id="cam-error">Camera permission denied — set webcam to No or allow camera access and refresh.</div>
+      <div class="row">
+        <label>Show selfie preview</label>
+        <select id="cfg-selfie">
+          <option value="1">Yes</option>
+          <option value="0">No</option>
+        </select>
+      </div>
+      <div id="cam-error">Camera permission denied - set webcam to No or allow camera access and refresh.</div>
       <p class="hint">Browser will prompt for camera permission on first run. WebM video downloads after the trial.</p>
     </div>
 
@@ -195,6 +214,49 @@ function resizeCanvas(){
   canvas.width=w; canvas.height=h;
 }
 
+function getSelfieBounds(){
+  if(!cfg.webcam || !cfg.selfie) return null;
+  const pip=document.getElementById('webcam-pip');
+  if(pip.style.display==='none') return null;
+  return {
+    left: pip.offsetLeft,
+    top: pip.offsetTop,
+    right: pip.offsetLeft+pip.offsetWidth,
+    bottom: pip.offsetTop+pip.offsetHeight,
+  };
+}
+
+function applySelfieBoundary(r){
+  const bounds=getSelfieBounds();
+  if(!bounds) return;
+
+  const nearestX=Math.max(bounds.left, Math.min(ball.x, bounds.right));
+  const nearestY=Math.max(bounds.top, Math.min(ball.y, bounds.bottom));
+  const dx=ball.x-nearestX;
+  const dy=ball.y-nearestY;
+  if((dx*dx)+(dy*dy)>r*r) return;
+
+  const overlapLeft=(ball.x+r)-bounds.left;
+  const overlapTop=(ball.y+r)-bounds.top;
+  const overlapRight=bounds.right-(ball.x-r);
+  const overlapBottom=bounds.bottom-(ball.y-r);
+  const minOverlap=Math.min(overlapLeft,overlapTop,overlapRight,overlapBottom);
+
+  if(minOverlap===overlapLeft){
+    ball.x=bounds.left-r;
+    ball.vx=-Math.abs(ball.vx);
+  }else if(minOverlap===overlapTop){
+    ball.y=bounds.top-r;
+    ball.vy=-Math.abs(ball.vy);
+  }else if(minOverlap===overlapRight){
+    ball.x=bounds.right+r;
+    ball.vx=Math.abs(ball.vx);
+  }else{
+    ball.y=bounds.bottom+r;
+    ball.vy=Math.abs(ball.vy);
+  }
+}
+
 async function startGame(){
   cfg={
     duration:  parseInt(document.getElementById('cfg-duration').value)  || 30,
@@ -202,6 +264,7 @@ async function startGame(){
     size:      parseInt(document.getElementById('cfg-size').value),
     phaseDur:  parseInt(document.getElementById('cfg-phase-dur').value) || 4,
     webcam:    parseInt(document.getElementById('cfg-webcam').value),
+    selfie:    parseInt(document.getElementById('cfg-selfie').value),
     pid:       document.getElementById('cfg-pid').value.trim() || 'P01',
   };
 
@@ -231,7 +294,7 @@ async function startGame(){
       stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
       const vid=document.getElementById('webcam-vid');
       vid.srcObject=stream;
-      document.getElementById('webcam-pip').style.display='block';
+      document.getElementById('webcam-pip').style.display=cfg.selfie?'block':'none';
       const mimeType=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
         .find(t=>MediaRecorder.isTypeSupported(t)) || '';
       try{
@@ -242,11 +305,11 @@ async function startGame(){
       }catch(e){ mediaRec=null; }
     }catch(e){
       cfg.webcam=0;
-      document.getElementById('pip-off').style.display='flex';
+      document.getElementById('pip-off').style.display='none';
       document.getElementById('cam-error').style.display='block';
     }
   }else{
-    document.getElementById('pip-off').style.display='flex';
+    document.getElementById('pip-off').style.display='none';
   }
 
   startT=performance.now();
@@ -270,6 +333,11 @@ function loop(now){
 
   ball.x+=ball.vx; ball.y+=ball.vy;
   const r=cfg.size;
+  if(ball.x<r){  ball.x=r;   ball.vx= Math.abs(ball.vx); }
+  if(ball.x>w-r){ball.x=w-r; ball.vx=-Math.abs(ball.vx); }
+  if(ball.y<r){  ball.y=r;   ball.vy= Math.abs(ball.vy); }
+  if(ball.y>h-r){ball.y=h-r; ball.vy=-Math.abs(ball.vy); }
+  applySelfieBoundary(r);
   if(ball.x<r){  ball.x=r;   ball.vx= Math.abs(ball.vx); }
   if(ball.x>w-r){ball.x=w-r; ball.vx=-Math.abs(ball.vx); }
   if(ball.y<r){  ball.y=r;   ball.vy= Math.abs(ball.vy); }
