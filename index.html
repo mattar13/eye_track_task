@@ -196,6 +196,7 @@
       <div class="stat"><div class="stat-label">Frames logged</div><div class="stat-val" id="stat-frames">—</div></div>
       <div class="stat"><div class="stat-label">Duration</div><div class="stat-val" id="stat-dur">—</div></div>
       <div class="stat"><div class="stat-label">Participant</div><div class="stat-val" id="stat-pid">—</div></div>
+      <div class="stat"><div class="stat-label">Start recording time</div><div class="stat-val" id="stat-start-time">—</div></div>
       <div class="stat"><div class="stat-label">Webcam</div><div class="stat-val" id="stat-cam">—</div></div>
     </div>
     <div class="btn-row">
@@ -203,7 +204,7 @@
       <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download Video</button>
       <button class="btn" onclick="resetToStart()">New trial</button>
     </div>
-    <p class="hint" style="margin-top:1rem">CSV columns: timestamp_ms, elapsed_s, ball_x, ball_y, ball_x_norm, ball_y_norm, phase, phase_label, canvas_w, canvas_h, participant_id</p>
+    <p class="hint" style="margin-top:1rem">CSV columns include recording_start_iso, recording_start_epoch_ms, timestamp_ms, elapsed_s, ball position, phase, canvas size, participant_id</p>
   </div>
 
 </div>
@@ -217,6 +218,9 @@ const PHASES=[
 let cfg={};
 let animId=null;
 let startT=null;
+let recordingStartDate=null;
+let recordingStartIso='';
+let recordingStartEpochMs=0;
 let lastFrameT=null;
 let rows=[];
 let ball={x:0,y:0,vx:0,vy:0};
@@ -395,6 +399,9 @@ function startGame(){
   document.getElementById('pip-off').style.display='none';
   stream=null; mediaRec=null;
 
+  recordingStartDate=new Date();
+  recordingStartIso=recordingStartDate.toISOString();
+  recordingStartEpochMs=recordingStartDate.getTime();
   startT=performance.now();
   lastFrameT=startT;
   drawFrame(0,w,h,cfg.size,currentPhase,phaseCount-1);
@@ -556,6 +563,8 @@ function loop(now){
   }
 
   rows.push({
+    recording_start_iso: recordingStartIso,
+    recording_start_epoch_ms: recordingStartEpochMs,
     timestamp_ms:  Math.round(now-startT),
     elapsed_s:     parseFloat(elapsed.toFixed(3)),
     ball_x:        parseFloat(ball.x.toFixed(2)),
@@ -602,10 +611,12 @@ function stopGame(){
   document.getElementById('stat-frames').textContent=rows.length.toLocaleString();
   document.getElementById('stat-dur').textContent=dur.toFixed(1)+' s';
   document.getElementById('stat-pid').textContent=cfg.pid;
+  document.getElementById('stat-start-time').textContent=recordingStartIso;
   document.getElementById('stat-cam').textContent=cfg.webcam?'recorded':'off';
   document.getElementById('dl-video-btn').style.display=cfg.webcam?'inline-flex':'none';
 
-  const cols=['timestamp_ms','elapsed_s','ball_x','ball_y','ball_x_norm','ball_y_norm',
+  const cols=['recording_start_iso','recording_start_epoch_ms',
+              'timestamp_ms','elapsed_s','ball_x','ball_y','ball_x_norm','ball_y_norm',
               'phase','phase_label','canvas_w','canvas_h','participant_id'];
   const lines=[cols.join(','), ...rows.map(r=>cols.map(c=>r[c]).join(','))];
   csvData=lines.join('\n');
