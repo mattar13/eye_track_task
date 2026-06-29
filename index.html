@@ -817,12 +817,17 @@ function exportFilenames(){
 }
 
 function addAssociatedFileMetadata(files){
+  if(metadataRows.some(r=>r.category==='files'&&r.field==='associated_track_path')) return;
+  addMetadata('files','export_schema_version','metadata-associated-files-v2','','app',true,'Metadata CSV is the manifest; no separate manifest CSV is exported.');
   addMetadata('files','metadata_path',files.metadata,'','app',true,'This metadata file for the trial.');
   addMetadata('files','associated_track_path',files.track,'','app',true,'Relative filename for the trial track CSV.');
   addMetadata('files','associated_webcam_path',videoBlob ? files.video : 'unavailable','','app',!!videoBlob,videoBlob ? 'Relative filename for the webcam recording.' : 'No webcam recording was exported for this trial.');
 }
 
 function buildMetadataCSV(files=null){
+  if(files){
+    addAssociatedFileMetadata(files);
+  }
   if(!metadataFinalized){
     if(!cameraMetadataCollected){
       collectNoCameraMetadata(cfg.webcam ? 'Camera permission failed or stream did not start.' : 'Webcam recording disabled for this session.');
@@ -833,9 +838,6 @@ function buildMetadataCSV(files=null){
     }
     addMetadata('timing','camera_frame_samples_count',cameraFrameSamples.length,'frames','requestVideoFrameCallback',cameraFrameSamples.length>0);
     addMetadata('timing','camera_frame_samples_exported','no','','app',true,'Per-frame timing samples are summarized only; the large camera_frame table is intentionally omitted from metadata CSV.');
-    if(files){
-      addAssociatedFileMetadata(files);
-    }
     metadataFinalized=true;
   }
 
