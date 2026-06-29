@@ -784,7 +784,6 @@ function stopGame(){
               'phase','phase_label','canvas_w','canvas_h','participant_id'];
   const lines=[cols.join(','), ...rows.map(r=>cols.map(c=>r[c]).join(','))];
   csvData=lines.join('\n');
-  metadataCsvData=buildMetadataCSV();
 
   document.body.classList.remove('playing');
   document.getElementById('game-screen').style.display='none';
@@ -814,11 +813,16 @@ function exportFilenames(){
     track:`${base}_track.csv`,
     metadata:`${base}_metadata.csv`,
     video:`${base}_webcam.${videoExt}`,
-    manifest:`${base}_manifest.csv`,
   };
 }
 
-function buildMetadataCSV(){
+function addAssociatedFileMetadata(files){
+  addMetadata('files','metadata_path',files.metadata,'','app',true,'This metadata file for the trial.');
+  addMetadata('files','associated_track_path',files.track,'','app',true,'Relative filename for the trial track CSV.');
+  addMetadata('files','associated_webcam_path',videoBlob ? files.video : 'unavailable','','app',!!videoBlob,videoBlob ? 'Relative filename for the webcam recording.' : 'No webcam recording was exported for this trial.');
+}
+
+function buildMetadataCSV(files=null){
   if(!metadataFinalized){
     if(!cameraMetadataCollected){
       collectNoCameraMetadata(cfg.webcam ? 'Camera permission failed or stream did not start.' : 'Webcam recording disabled for this session.');
@@ -829,6 +833,9 @@ function buildMetadataCSV(){
     }
     addMetadata('timing','camera_frame_samples_count',cameraFrameSamples.length,'frames','requestVideoFrameCallback',cameraFrameSamples.length>0);
     addMetadata('timing','camera_frame_samples_exported','no','','app',true,'Per-frame timing samples are summarized only; the large camera_frame table is intentionally omitted from metadata CSV.');
+    if(files){
+      addAssociatedFileMetadata(files);
+    }
     metadataFinalized=true;
   }
 
@@ -842,33 +849,13 @@ function buildMetadataCSV(){
   return lines.join('\n');
 }
 
-function buildManifestCSV(files){
-  const cols=['trial_name','recording_start_iso','recording_start_epoch_ms','file_type','relative_filename'];
-  const rowsForManifest=[
-    {file_type:'track_csv',relative_filename:files.track},
-    {file_type:'metadata_csv',relative_filename:files.metadata},
-    ...(videoBlob ? [{file_type:'video',relative_filename:files.video}] : []),
-    {file_type:'manifest_csv',relative_filename:files.manifest},
-  ];
-  return [
-    cols.join(','),
-    ...rowsForManifest.map(r=>[
-      trialName(),
-      recordingStartIso,
-      recordingStartEpochMs,
-      r.file_type,
-      r.relative_filename,
-    ].map(csvEscape).join(',')),
-  ].join('\n');
-}
-
 function exportAllFiles(){
   if(cfg.webcam&&mediaRec&&!videoBlob){
     setTimeout(exportAllFiles,300);
     return;
   }
-  if(!metadataCsvData) metadataCsvData=buildMetadataCSV();
   const files=exportFilenames();
+  if(!metadataCsvData) metadataCsvData=buildMetadataCSV(files);
   const exports=[
     {blob:new Blob([csvData],{type:'text/csv'}), filename:files.track},
     {blob:new Blob([metadataCsvData],{type:'text/csv'}), filename:files.metadata},
@@ -876,7 +863,6 @@ function exportAllFiles(){
   if(videoBlob){
     exports.push({blob:videoBlob, filename:files.video});
   }
-  exports.push({blob:new Blob([buildManifestCSV(files)],{type:'text/csv'}), filename:files.manifest});
   exports.forEach((item,idx)=>{
     setTimeout(()=>triggerDownload(item.blob,item.filename),idx*250);
   });
