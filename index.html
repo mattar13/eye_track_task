@@ -804,8 +804,12 @@ function trialName(){
   return safeName(cfg.pid);
 }
 
+function recordingStartFileStamp(){
+  return safeName(recordingStartIso.replace(/\.\d{3}Z$/,'Z'));
+}
+
 function exportFilenames(){
-  const base='olai_'+trialName();
+  const base='olai_'+trialName()+'_'+recordingStartFileStamp();
   return {
     track:`${base}_track.csv`,
     metadata:`${base}_metadata.csv`,
