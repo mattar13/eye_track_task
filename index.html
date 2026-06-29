@@ -200,9 +200,7 @@
       <div class="stat"><div class="stat-label">Webcam</div><div class="stat-val" id="stat-cam">—</div></div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-go" onclick="downloadCSV()">&#8595; Download CSV</button>
-      <button class="btn" onclick="downloadMetadataCSV()">&#8595; Download Metadata CSV</button>
-      <button class="btn" onclick="downloadVideo()" id="dl-video-btn">&#8595; Download Video</button>
+      <button class="btn btn-go" onclick="exportAllFiles()">&#8595; Export All Files</button>
       <button class="btn" onclick="resetToStart()">New trial</button>
     </div>
     <p class="hint" style="margin-top:1rem">CSV columns include recording_start_iso, recording_start_epoch_ms, timestamp_ms, elapsed_s, ball position, phase, canvas size, participant_id</p>
@@ -780,7 +778,6 @@ function stopGame(){
   document.getElementById('stat-pid').textContent=cfg.pid;
   document.getElementById('stat-start-time').textContent=recordingStartIso;
   document.getElementById('stat-cam').textContent=cfg.webcam?'recorded':'off';
-  document.getElementById('dl-video-btn').style.display=cfg.webcam?'inline-flex':'none';
 
   const cols=['recording_start_iso','recording_start_epoch_ms',
               'timestamp_ms','elapsed_s','ball_x','ball_y','ball_x_norm','ball_y_norm',
@@ -794,20 +791,27 @@ function stopGame(){
   document.getElementById('end-screen').style.display='block';
 }
 
-function downloadCSV(){
-  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-  triggerDownload(new Blob([csvData],{type:'text/csv'}), `olai_track_${cfg.pid}_${ts}.csv`);
-}
-
-function downloadVideo(){
-  if(!videoBlob){ setTimeout(downloadVideo,300); return; }
-  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-  triggerDownload(videoBlob, `olai_webcam_${cfg.pid}_${ts}.${videoExt}`);
-}
-
 function csvEscape(value){
   const s=String(value===undefined || value===null ? '' : value);
   return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+
+function safeName(value){
+  return String(value || 'trial').trim().replace(/[^a-z0-9_-]+/gi,'_').replace(/^_+|_+$/g,'') || 'trial';
+}
+
+function trialName(){
+  return safeName(cfg.pid);
+}
+
+function exportFilenames(){
+  const base='olai_'+trialName();
+  return {
+    track:`${base}_track.csv`,
+    metadata:`${base}_metadata.csv`,
+    video:`${base}_webcam.${videoExt}`,
+    manifest:`${base}_manifest.csv`,
+  };
 }
 
 function buildMetadataCSV(){
@@ -834,10 +838,44 @@ function buildMetadataCSV(){
   return lines.join('\n');
 }
 
-function downloadMetadataCSV(){
+function buildManifestCSV(files){
+  const cols=['trial_name','recording_start_iso','recording_start_epoch_ms','file_type','relative_filename'];
+  const rowsForManifest=[
+    {file_type:'track_csv',relative_filename:files.track},
+    {file_type:'metadata_csv',relative_filename:files.metadata},
+    ...(videoBlob ? [{file_type:'video',relative_filename:files.video}] : []),
+    {file_type:'manifest_csv',relative_filename:files.manifest},
+  ];
+  return [
+    cols.join(','),
+    ...rowsForManifest.map(r=>[
+      trialName(),
+      recordingStartIso,
+      recordingStartEpochMs,
+      r.file_type,
+      r.relative_filename,
+    ].map(csvEscape).join(',')),
+  ].join('\n');
+}
+
+function exportAllFiles(){
+  if(cfg.webcam&&mediaRec&&!videoBlob){
+    setTimeout(exportAllFiles,300);
+    return;
+  }
   if(!metadataCsvData) metadataCsvData=buildMetadataCSV();
-  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-  triggerDownload(new Blob([metadataCsvData],{type:'text/csv'}), `olai_metadata_${cfg.pid}_${ts}.csv`);
+  const files=exportFilenames();
+  const exports=[
+    {blob:new Blob([csvData],{type:'text/csv'}), filename:files.track},
+    {blob:new Blob([metadataCsvData],{type:'text/csv'}), filename:files.metadata},
+  ];
+  if(videoBlob){
+    exports.push({blob:videoBlob, filename:files.video});
+  }
+  exports.push({blob:new Blob([buildManifestCSV(files)],{type:'text/csv'}), filename:files.manifest});
+  exports.forEach((item,idx)=>{
+    setTimeout(()=>triggerDownload(item.blob,item.filename),idx*250);
+  });
 }
 
 function triggerDownload(blob,filename){
